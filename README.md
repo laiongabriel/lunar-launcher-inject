@@ -10,6 +10,6 @@ Re-enables agent attaching and loads agents from an `agents` directory next to t
 * `.dll` (Windows), `.so` (Linux), or `.dylib` (macOS) files as native agents using `-agentpath:`
 
 ## Usage
-* [Download the executable for your OS](https://github.com/Nilsen84/lunar-launcher-inject/releases/latest)
+* [Download the executable for your OS](https://github.com/laiongabriel/lunar-launcher-inject/releases/latest)
 * Place it in a directory and put any premain agents you want to use inside an `agents` folder next to it
 * Launch lunar using this program instead of the official launcher. The launcher looks normal but will silently inject the agents on launch.
