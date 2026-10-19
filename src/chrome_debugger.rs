@@ -54,7 +54,7 @@ impl ChromeDebugger {
         })
     }
 
-    pub fn send(&mut self, id: u32, method: &str, params: serde_json::Value) -> Result<(), Error> {
+    pub fn send(&mut self, id: u32, method: &str, params: &serde_json::Value) -> Result<(), Error> {
         self.ws.send(WsMessage::Text(
             serde_json::to_string(&json!({
                 "id": id,

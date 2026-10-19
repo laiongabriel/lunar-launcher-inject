@@ -1,7 +1,7 @@
+use std::fmt::Write as _;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::string::String;
 use std::sync::mpsc;
 use std::time::Duration;
 use std::{env, io, thread};
@@ -9,7 +9,7 @@ use std::{env, io, thread};
 use serde_json::json;
 
 use crate::chrome_debugger::{ChromeDebugger, Message};
-use crate::error::{io_error, Error, LocateError};
+use crate::error::{Error, LocateError, io_error};
 
 mod chrome_debugger;
 mod error;
@@ -40,10 +40,10 @@ fn find_lunar_executable() -> Result<PathBuf, LocateError> {
     };
 
     paths.iter().find(|p| p.exists()).cloned().ok_or_else(|| {
-        let locations = paths
-            .iter()
-            .map(|path| format!("\n - {}", path.display()))
-            .collect();
+        let locations = paths.iter().fold(String::new(), |mut locations, path| {
+            let _ = write!(locations, "\n - {}", path.display());
+            locations
+        });
         LocateError::NotFound(locations)
     })
 }
@@ -58,7 +58,12 @@ fn wait_for_websocket_url(reader: &mut impl BufRead) -> io::Result<Option<String
 }
 
 fn inject_url(url: &str) -> Result<(), Error> {
-    println!("[LLI] Connecting to {}", url);
+    const ENABLE: u32 = 1;
+    const RUN: u32 = 2;
+    const EVALUATE: u32 = 3;
+    const DISABLE: u32 = 4;
+
+    println!("[LLI] Connecting to {url}");
     let mut debugger = ChromeDebugger::connect_url(url).map_err(Error::Connect)?;
 
     let executable =
@@ -76,12 +81,7 @@ fn inject_url(url: &str) -> Result<(), Error> {
         serde_json::to_string(&agent_directory)?
     );
 
-    const ENABLE: u32 = 1;
-    const RUN: u32 = 2;
-    const EVALUATE: u32 = 3;
-    const DISABLE: u32 = 4;
-
-    debugger.send(ENABLE, "Debugger.enable", json!({}))?;
+    debugger.send(ENABLE, "Debugger.enable", &json!({}))?;
     let mut evaluating = false;
     loop {
         let message = debugger.read()?;
@@ -91,7 +91,7 @@ fn inject_url(url: &str) -> Result<(), Error> {
                 return Err(Error::Cdp { id, source: error });
             }
             Message::Success { id: ENABLE, .. } => {
-                debugger.send(RUN, "Runtime.runIfWaitingForDebugger", json!({}))?;
+                debugger.send(RUN, "Runtime.runIfWaitingForDebugger", &json!({}))?;
             }
             Message::Event { method, params } if method == "Debugger.paused" && !evaluating => {
                 let frame = params
@@ -101,7 +101,7 @@ fn inject_url(url: &str) -> Result<(), Error> {
                 debugger.send(
                     EVALUATE,
                     "Debugger.evaluateOnCallFrame",
-                    json!({
+                    &json!({
                         "callFrameId": frame,
                         "expression": payload
                     }),
@@ -112,11 +112,11 @@ fn inject_url(url: &str) -> Result<(), Error> {
                 id: EVALUATE,
                 result,
             } => {
-                if let Some(_) = result.get("exceptionDetails") {
+                if result.get("exceptionDetails").is_some() {
                     return Err(Error::JavaScript);
                 }
                 // Disabling the debugger also resumes execution.
-                debugger.send(DISABLE, "Debugger.disable", json!({}))?;
+                debugger.send(DISABLE, "Debugger.disable", &json!({}))?;
             }
             Message::Success { id: DISABLE, .. } => break,
             _ => {}
@@ -166,7 +166,7 @@ fn run() -> Result<(), Error> {
             return Err(Error::Io {
                 operation: "failed to read lunar stderr",
                 source,
-            })
+            });
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             return Err(Error::StartupTimeout);
@@ -190,7 +190,39 @@ fn run() -> Result<(), Error> {
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("[error] {}", e);
+        eprintln!("[error] {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    mod wait_for_websocket_url {
+        use std::io::Cursor;
+
+        use super::super::wait_for_websocket_url;
+
+        #[test]
+        fn returns_url_when_lunar_reports_the_debugger() {
+            let mut stderr = Cursor::new(
+                b"noise on the first line\nDebugger listening on ws://127.0.0.1:9229/uuid\n",
+            );
+
+            let url = wait_for_websocket_url(&mut stderr);
+
+            assert_eq!(
+                url.expect("reading stderr should not fail"),
+                Some("ws://127.0.0.1:9229/uuid".into())
+            );
+        }
+
+        #[test]
+        fn returns_none_when_lunar_never_reports_the_debugger() {
+            let mut stderr = Cursor::new(b"just noise\n");
+
+            let url = wait_for_websocket_url(&mut stderr);
+
+            assert_eq!(url.expect("reading stderr should not fail"), None);
+        }
     }
 }

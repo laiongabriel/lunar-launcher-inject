@@ -41,7 +41,9 @@ pub enum LocateError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("failed to locate lunars launcher: {0}\nMake sure you have lunar installed before running lunar-launcher-inject")]
+    #[error(
+        "failed to locate lunars launcher: {0}\nMake sure you have lunar installed before running lunar-launcher-inject"
+    )]
     Locate(#[from] LocateError),
     #[error("{operation}: {source}")]
     Io {

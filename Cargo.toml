@@ -12,6 +12,15 @@ scopeguard = "1.2.0"
 thiserror = "2.0.20"
 tungstenite = "0.30.0"
 
+[lints.rust]
+future_incompatible = { level = "warn", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+
+[lints.clippy]
+all = { level = "deny", priority = 10 }
+redundant_clone = { level = "deny", priority = 9 }
+pedantic = { level = "warn", priority = 3 }
+
 [profile.release]
 strip = true
 lto = true
