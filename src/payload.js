@@ -3,6 +3,7 @@
     const path = require('path')
 
     function getAgentArgs() {
+        if (!fs.existsSync(agentDirectory)) return []
         const nativeExtension = { win32: '.dll', linux: '.so', darwin: '.dylib' }[process.platform]
         return fs.readdirSync(agentDirectory, {withFileTypes: true})
             .filter(f => f.isFile() && (f.name.endsWith('.jar') || path.extname(f.name) === nativeExtension))

@@ -21,10 +21,7 @@ fn find_lunar_executable() -> Result<PathBuf, LocateError> {
                 env::var_os("LOCALAPPDATA").ok_or(LocateError::MissingEnv("LOCALAPPDATA"))?,
             );
 
-            vec![
-                localappdata.join(r"Programs\launcher\Lunar Client.exe"),
-                localappdata.join(r"Programs\lunarclient\Lunar Client.exe"),
-            ]
+            vec![localappdata.join(r"Programs\Lunar Client\Lunar Client.exe")]
         }
         "macos" => {
             let mut paths = vec![PathBuf::from(
@@ -67,10 +64,16 @@ fn inject_url(url: &str) -> Result<(), Error> {
     let executable =
         env::current_exe().map_err(io_error("failed to locate injector executable"))?;
 
+    // Agents are read from an "agents" directory next to the injector executable.
+    let agent_directory = executable
+        .parent()
+        .ok_or(Error::MissingParent)?
+        .join("agents");
+
     let payload = format!(
         "{}({})",
         include_str!("payload.js"),
-        serde_json::to_string(executable.parent().ok_or(Error::MissingParent)?)?
+        serde_json::to_string(&agent_directory)?
     );
 
     const ENABLE: u32 = 1;
