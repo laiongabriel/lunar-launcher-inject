@@ -1,4 +1,4 @@
-(function (agentDirectory, endpoint) {
+(function (agentDirectory) {
     const fs = require('fs')
     const path = require('path')
 

@@ -30,11 +30,9 @@ impl From<tungstenite::Error> for DebuggerError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocateError {
-    #[cfg_attr(windows, error("%{0}% not defined"))]
-    #[cfg_attr(not(windows), error("${0} not defined"))]
+    #[cfg(windows)]
+    #[error("%{0}% not defined")]
     MissingEnv(&'static str),
-    #[error("unsupported os: {0}")]
-    UnsupportedOs(&'static str),
     #[error("searched in the following locations:{0}")]
     NotFound(String),
 }
@@ -67,8 +65,8 @@ pub enum Error {
     MissingCallFrame,
     #[error("injection threw a JavaScript exception")]
     JavaScript,
-    #[error("Lunar did not publish a debugger URL within 15 seconds")]
-    StartupTimeout,
+    #[error("Lunar did not publish a debugger URL within {seconds} seconds")]
+    StartupTimeout { seconds: u64 },
     #[error("stderr reader stopped before reporting a debugger URL")]
     StderrDisconnected,
     #[error("stderr reader thread panicked")]

@@ -32,7 +32,7 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform.name }}
           ARCH: ${{ matrix.platform.arch }}
-          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_NAME: ${{ github.event.release.tag_name }}
         run: |
           cargo +stable build --release --locked
 

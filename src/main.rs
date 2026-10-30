@@ -1,3 +1,7 @@
+#![forbid(unsafe_code)]
+// Release builds run without a console window; failures go to %TEMP% instead.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 use std::fmt::Write as _;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -14,39 +18,54 @@ use crate::error::{Error, LocateError, io_error};
 mod chrome_debugger;
 mod error;
 
+/// How long Lunar has to publish its debugger URL on stderr.
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+
 fn find_lunar_executable() -> Result<PathBuf, LocateError> {
-    let paths: Vec<PathBuf> = match env::consts::OS {
-        "windows" => {
-            let localappdata = PathBuf::from(
-                env::var_os("LOCALAPPDATA").ok_or(LocateError::MissingEnv("LOCALAPPDATA"))?,
-            );
+    let paths = lunar_candidates()?;
 
-            vec![localappdata.join(r"Programs\Lunar Client\Lunar Client.exe")]
-        }
-        "macos" => {
-            let mut paths = vec![PathBuf::from(
-                "/Applications/Lunar Client.app/Contents/MacOS/Lunar Client",
-            )];
-            if let Some(home) = env::var_os("HOME") {
-                paths.push(
-                    PathBuf::from(home)
-                        .join("Applications/Lunar Client.app/Contents/MacOS/Lunar Client"),
-                );
-            }
-            paths
-        }
-        "linux" => vec!["/usr/bin/lunarclient".into()],
-        os => return Err(LocateError::UnsupportedOs(os)),
-    };
-
-    paths.iter().find(|p| p.exists()).cloned().ok_or_else(|| {
-        let locations = paths.iter().fold(String::new(), |mut locations, path| {
-            let _ = write!(locations, "\n - {}", path.display());
-            locations
-        });
-        LocateError::NotFound(locations)
-    })
+    paths
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .ok_or_else(|| {
+            let locations = paths.iter().fold(String::new(), |mut locations, path| {
+                let _ = write!(locations, "\n - {}", path.display());
+                locations
+            });
+            LocateError::NotFound(locations)
+        })
 }
+
+#[cfg(windows)]
+fn lunar_candidates() -> Result<Vec<PathBuf>, LocateError> {
+    let local_appdata =
+        PathBuf::from(env::var_os("LOCALAPPDATA").ok_or(LocateError::MissingEnv("LOCALAPPDATA"))?);
+
+    Ok(vec![
+        local_appdata.join(r"Programs\Lunar Client\Lunar Client.exe"),
+    ])
+}
+
+#[cfg(target_os = "macos")]
+fn lunar_candidates() -> Result<Vec<PathBuf>, LocateError> {
+    const BUNDLE: &str = "Lunar Client.app/Contents/MacOS/Lunar Client";
+
+    let mut paths = vec![PathBuf::from("/Applications").join(BUNDLE)];
+    if let Some(home) = env::var_os("HOME") {
+        paths.push(PathBuf::from(home).join("Applications").join(BUNDLE));
+    }
+
+    Ok(paths)
+}
+
+#[cfg(target_os = "linux")]
+fn lunar_candidates() -> Result<Vec<PathBuf>, LocateError> {
+    Ok(vec![PathBuf::from("/usr/bin/lunarclient")])
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+compile_error!("lunar-launcher-inject only supports Windows, macOS and Linux");
 
 fn wait_for_websocket_url(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     for line in reader.lines() {
@@ -54,6 +73,7 @@ fn wait_for_websocket_url(reader: &mut impl BufRead) -> io::Result<Option<String
             return Ok(Some(url.into()));
         }
     }
+
     Ok(None)
 }
 
@@ -63,7 +83,7 @@ fn inject_url(url: &str) -> Result<(), Error> {
     const EVALUATE: u32 = 3;
     const DISABLE: u32 = 4;
 
-    println!("[LLI] Connecting to {url}");
+    eprintln!("[LLI] connecting to {url}");
     let mut debugger = ChromeDebugger::connect_url(url).map_err(Error::Connect)?;
 
     let executable =
@@ -84,9 +104,7 @@ fn inject_url(url: &str) -> Result<(), Error> {
     debugger.send(ENABLE, "Debugger.enable", &json!({}))?;
     let mut evaluating = false;
     loop {
-        let message = debugger.read()?;
-        println!("[CDP] {message:?}");
-        match message {
+        match debugger.read()? {
             Message::Failure { id, error } => {
                 return Err(Error::Cdp { id, source: error });
             }
@@ -160,7 +178,7 @@ fn run() -> Result<(), Error> {
         })
         .map_err(io_error("failed to start stderr reader"))?;
 
-    let url = match url_rx.recv_timeout(Duration::from_secs(15)) {
+    let url = match url_rx.recv_timeout(STARTUP_TIMEOUT) {
         Ok(Ok(url)) => url,
         Ok(Err(source)) => {
             return Err(Error::Io {
@@ -169,7 +187,9 @@ fn run() -> Result<(), Error> {
             });
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            return Err(Error::StartupTimeout);
+            return Err(Error::StartupTimeout {
+                seconds: STARTUP_TIMEOUT.as_secs(),
+            });
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             return Err(Error::StderrDisconnected);
@@ -180,19 +200,27 @@ fn run() -> Result<(), Error> {
 
     let mut child = scopeguard::ScopeGuard::into_inner(cp);
     child.wait().map_err(io_error("failed to wait for lunar"))?;
-    // Do not join the command thread: it may be blocked on terminal input.
     stderr_thread
         .join()
         .map_err(|_| Error::StderrThreadPanicked)?
         .map_err(io_error("failed to drain lunar stderr"))?;
+
     Ok(())
 }
 
 fn main() {
     if let Err(e) = run() {
         eprintln!("[error] {e}");
+        log_error(&e);
         std::process::exit(1);
     }
+}
+
+/// Release builds have no console, so a failure is also written next to the
+/// other temporary files instead of disappearing.
+fn log_error(error: &Error) {
+    let path = env::temp_dir().join("lunar-launcher-inject.log");
+    let _ = std::fs::write(&path, format!("[error] {error}\n"));
 }
 
 #[cfg(test)]

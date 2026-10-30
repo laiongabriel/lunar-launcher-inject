@@ -1,7 +1,9 @@
 [package]
 name = "lunar_launcher_inject"
-version = "1.4.0"
+version = "1.5.0"
 edition = "2024"
+description = "Injects JVM agents into Lunar Client by hooking its Electron launcher"
+repository = "https://github.com/laiongabriel/lunar-launcher-inject"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
