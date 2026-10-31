@@ -32,7 +32,7 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform.name }}
           ARCH: ${{ matrix.platform.arch }}
-          RELEASE_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name || github.event.release.tag_name }}
         run: |
           cargo +stable build --release --locked
 
@@ -47,6 +47,6 @@ jobs:
             "./artifacts/lunar-launcher-inject-$PLATFORM-$ARCH-$RELEASE_NAME$ext"
 
       - name: Upload Executable
-        run: gh release upload "$GITHUB_REF_NAME" ./artifacts/*
+        run: gh release upload "$GITHUB_REF_NAME" ./artifacts/* --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
